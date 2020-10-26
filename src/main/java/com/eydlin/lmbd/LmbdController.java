@@ -2,6 +2,9 @@ package com.eydlin.lmbd;
 
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.BuildImageResultCallback;
+import com.github.dockerjava.api.command.CreateContainerResponse;
+import com.github.dockerjava.api.command.InspectContainerResponse;
+import com.github.dockerjava.api.model.PortBinding;
 import com.github.dockerjava.core.DockerClientBuilder;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
@@ -89,5 +92,21 @@ public class LmbdController {
             }
         }
 
+    }
+
+    @PostMapping("/run")
+    public String run(@RequestParam("tag") String tag, @RequestParam("ports") String ports) {
+        try (DockerClient dockerClient = DockerClientBuilder.getInstance("tcp://localhost:2375").build()) {
+            CreateContainerResponse container = dockerClient
+                    .createContainerCmd(tag)
+                    .withPortBindings(PortBinding.parse(ports))
+                    .exec();
+            dockerClient.startContainerCmd(container.getId()).exec();
+            InspectContainerResponse inspect = dockerClient.inspectContainerCmd(container.getId()).exec();
+            return inspect.toString();
+        } catch (IOException e) {
+            log.error("unexpected error", e);
+            throw new RuntimeException(e);
+        }
     }
 }
