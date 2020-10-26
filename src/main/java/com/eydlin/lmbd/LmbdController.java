@@ -1,18 +1,22 @@
 package com.eydlin.lmbd;
 
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.command.BuildImageResultCallback;
+import com.github.dockerjava.core.DockerClientBuilder;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.FileUtils;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.UUID;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -20,20 +24,13 @@ import java.util.zip.ZipInputStream;
 @RestController
 @Slf4j
 public class LmbdController {
-    
-    @GetMapping("/hello")
-    public String hello() {
-        return "Hello world";
-    }
 
     @PostMapping("/upload")
-    public String upload(@RequestParam("file") MultipartFile file) {
-        processFile(file);
-
-        return "upload successful";
+    public String upload(@RequestParam("file") MultipartFile file, @RequestParam(name = "tag", required = false) String tag) {
+        return processFile(file, tag);
     }
 
-    private void processFile(@NonNull MultipartFile file) {
+    private String processFile(@NonNull MultipartFile file, String tag) {
         String tmpDir = System.getProperty("java.io.tmpdir");
         String uuid = UUID.randomUUID().toString();
         Path tmp = FileSystems.getDefault()
@@ -66,15 +63,30 @@ public class LmbdController {
                         }
                     }
                 };
+                Path dockerfilePath = target.resolve("Dockerfile").normalize();
+                if (Files.exists(dockerfilePath) && Files.isRegularFile(dockerfilePath)) {
+                    log.debug("Dockerfile: {}", dockerfilePath.toString());
+                    try (DockerClient dockerClient = DockerClientBuilder.getInstance("tcp://localhost:2375").build()) {
+                        return dockerClient
+                                .buildImageCmd()
+                                .withDockerfile(dockerfilePath.toFile())
+                                .withTags(Collections.singleton(tag))
+                                .exec(new BuildImageResultCallback())
+                                .awaitImageId();
+                    }
+                } else {
+                    throw new IllegalArgumentException("Dockerfile not present");
+                }
             }
         } catch (Throwable th) {
-            th.printStackTrace();
+            log.error("unexpected error", th);
+            throw new RuntimeException(th);
         } finally {
-//            try {
-//                FileUtils.deleteDirectory(target.toFile());
-//            } catch (IOException e) {
-//                log.error("delete error", e);
-//            }
+            try {
+                FileUtils.deleteDirectory(target.toFile());
+            } catch (IOException e) {
+                log.error("delete error", e);
+            }
         }
 
     }
